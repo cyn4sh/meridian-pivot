@@ -48,3 +48,14 @@
 - Result: Confirmed the expected exponential pattern — Attempt 1 failed, waited 1 second; Attempt 2 failed, waited 2 seconds; Attempt 3 failed, waited 4 seconds; Attempt 4 failed and hit the max retry limit, at which point the exception was re-raised and a traceback printed. This confirmed the max-retry path works correctly — the program doesn't silently swallow a permanent failure, it surfaces it once retries are exhausted.
 - Source consulted: None — this was direct testing of my own code.
 - Next: Modify `unreliable_operation()` to fail a set number of times and then succeed, to test and confirm the "eventual success" path (currently untested since the function never succeeds).
+
+
+
+**Day 2 — 2026-08-18**
+
+### [14:41] Attempting: Test the "eventual success" path of the retry/backoff prototype to confirm the retry loop returns normally when an operation recovers, rather than only handling permanent failure.
+
+- Tried: Created `retry_backoff_success.py` with a modified `unreliable_operation()` that uses a global counter, causing it to raise an exception on the first two calls and succeed on the third. Ran `retry_with_backoff()` against this version to observe whether the function correctly stops retrying once the operation succeeds.
+- Result: Confirmed the expected behavior — Attempt 1 failed and waited 1 second, Attempt 2 failed and waited 2 seconds, and on Attempt 3 the operation succeeded, printing 'Operation successful!' and returning immediately without any further retries or unnecessary delay. This confirms the retry loop correctly distinguishes between "still failing, keep retrying" and "succeeded, stop and return" — both halves of the retry/backoff mechanism (failure path and recovery path) are now verified.
+- Source consulted: None — direct testing of my own code.
+- Next: Move on to webhook verification (second assigned tool) — retry/backoff prototype is now functionally complete and tested for both outcomes.
