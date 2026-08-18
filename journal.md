@@ -114,3 +114,10 @@
 - Source consulted:
   - Avantec — Timing attacks: https://www.avantec.ch/timing-attacks-when-time-betrays-security/
 - Next: Build a small webhook verification prototype in Python — generate a valid signature for a payload and confirm verification succeeds, then tamper with the payload and confirm verification correctly fails.
+
+### [21:42] Attempting: Write the first part of the webhook verification prototype — generating an HMAC-SHA256 signature from a payload and secret.
+
+- Tried: Created `webhook_verification_prototype/webhook_verification.py` with a fixed secret and a sample JSON payload, and used `hmac.new(secret, payload, hashlib.sha256).hexdigest()` to generate a signature, matching the sender-side process I researched earlier.
+- Result: Ran the script and got a signature: `f8643d9849640df3411646b1748dc9999e85bf0553bd8e0bbd19f2be63c8927c`. This confirmed the signature generation works as expected — 64 hex characters, matching the expected output length of SHA-256. This is only the sender side so far; the receiver-side verification (recalculating and comparing signatures) still needs to be built.
+- Source consulted: None — direct implementation based on earlier research.
+- Next: Write a `verify_signature()` function that recalculates the expected signature from a received payload and secret, then compares it against a received signature using `hmac.compare_digest()`.
