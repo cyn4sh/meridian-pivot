@@ -241,3 +241,101 @@ The import issue also helped me understand that Python's import behavior depends
 Test the integrated sync service with a tampered/invalid webhook and confirm that the service rejects it before any processing occurs.
 
 After that, add a downstream operation and integrate the retry/backoff logic for transient failures.
+
+
+### Sync Service Prototype — Downstream Operation and Final Integration
+
+### [22:32] Attempting
+
+After completing the webhook verification and retry/backoff experiments separately, I began connecting the two into a small sync-service prototype. The goal was to simulate a Northstar warehouse sending a signed webhook, verifying it first, then performing a downstream stock update that uses retry/backoff to recover from temporary failures.
+
+I decided to simulate the downstream stock update rather than connect it to the Django/PostgreSQL models, so the prototype stays focused on demonstrating webhook verification and retry/backoff without adding database complexity.
+
+### Tried
+
+**1. `sync_stock_update.py`** — a baseline simulated stock-update function that always succeeds:
+
+```python
+def update_stock_quantity(sku, quantity):
+    print(f"Updating {sku} stock to {quantity}")
+    return True
+```
+
+Run directly, this produced:
+```
+Updating MOUSE001 stock to 100
+Stock update successful: True
+```
+
+**2. `sync_stock_retry.py`** — added a module-level `attempts` counter so the function raises `ConnectionError("Temporary warehouse sync failure")` on the first two calls, to reproduce a transient failure with no retry logic yet:
+
+```
+Stock update attempt 1
+Traceback (most recent call last):
+  ...
+ConnectionError: Temporary warehouse sync failure
+```
+
+This confirmed the simulated operation genuinely fails when unhandled — the raw problem retry/backoff needs to solve.
+
+**3. `sync_stock_retry_backoff.py`** — wrapped the same failing operation in `update_stock_with_retry()`, using `max_retries=3` and exponential backoff (`delay = 2 ** (attempt - 1)`):
+
+```
+Stock update attempt 1
+Attempt 1 failed: Temporary warehouse sync failure
+Waiting 1 seconds before retrying...
+Stock update attempt 2
+Attempt 2 failed: Temporary warehouse sync failure
+Waiting 2 seconds before retrying...
+Stock update attempt 3
+Updating MOUSE001 stock to 100
+Stock update successful: True
+```
+
+Fails on attempts 1 and 2 (delays of 1s, then 2s), succeeds on attempt 3 once the counter clears the `attempts < 3` condition.
+
+**4. `sync_service_integrated.py`** — combined `verify_signature()` with `update_stock_with_retry()` inside `process_webhook()`:
+
+```
+Webhook signature verified
+Stock update attempt 1
+Attempt 1 failed: Temporary warehouse sync failure
+Waiting 1 seconds before retrying...
+Stock update attempt 2
+Attempt 2 failed: Temporary warehouse sync failure
+Waiting 2 seconds before retrying...
+Stock update attempt 3
+Updating MOUSE001 stock to 100
+Webhook processed successfully
+```
+
+Note: in this version, the SKU and quantity used for the stock update are hardcoded inside `process_webhook()` (`sku = "MOUSE001"`, `quantity = 100`) rather than parsed out of the actual `payload` argument. The payload is only used for signature verification, not data extraction. This is a simplification worth revisiting if the prototype needs to reflect real payload-driven updates.
+
+**5. `sync_service_integrated_tampered.py`** — reused `process_webhook()` from file 4, called with a tampered payload (`quantity` changed from 10 to 1000) against the original, now-mismatched signature:
+
+```
+Webhook rejected
+```
+
+No `Stock update attempt` line appeared, confirming the downstream operation — and therefore retry/backoff — is never reached when signature verification fails.
+
+### Result
+
+The integrated flow works as intended:
+
+```
+Signed webhook
+      ↓
+Verify signature
+      ↓
+   Valid?
+   /    \
+ No      Yes
+ ↓        ↓
+Reject   Update stock (with retry/backoff on transient failure)
+```
+
+Retry/backoff only ever runs after a webhook has passed signature verification — an invalid webhook is rejected before any downstream operation, and therefore before any retry attempt, is triggered.
+
+### Source consulted
+Own retry/backoff and webhook verification experiments from earlier in the week; the exponential backoff formula and `hmac.compare_digest()` verification pattern were reused directly rather than rebuilt.
