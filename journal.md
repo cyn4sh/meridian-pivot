@@ -206,3 +206,38 @@ I applied the same principle to webhook verification by testing both:
 Combine the retry/backoff and webhook verification work into one coherent sync-service prototype.
 
 The intended flow is to verify an incoming webhook first and reject it if the signature is invalid. If verification succeeds, the service can proceed with a downstream operation and use retry/backoff when that operation encounters a transient failure.
+
+
+### [21:24] Attempting
+
+Starting the integration of the webhook verification and retry/backoff work into a small sync-service prototype. The first goal was to create a service function that verifies an incoming webhook before allowing it to be processed.
+
+### Tried
+
+1. Created a new `sync_service_prototype/` directory for the integrated prototype.
+2. Created `sync_service.py` and reused the existing `verify_signature()` function from `webhook_signature_verification.py` instead of duplicating the HMAC verification logic.
+3. Added a `process_webhook()` function that verifies the received webhook signature first. If the signature is invalid, it returns `"Webhook rejected"`. If the signature is valid, it returns `"Webhook processed"`.
+4. When I first tried to run the service, Python returned:
+
+   ModuleNotFoundError: No module named 'webhook_verification_prototype'
+
+5. I first tried resolving the import issue by adding `__init__.py` files to the prototype directories so that Python could treat them as packages. This did not resolve the problem when running the file directly.
+6. I then ran the service from the project root as a Python module using:
+
+   python -m sync_service_prototype.sync_service
+
+### Result
+
+The module-based execution worked correctly and produced:
+
+Webhook processed
+
+This confirmed that the sync service could successfully import and reuse the existing `verify_signature()` function and allow a valid webhook to pass the verification stage.
+
+The import issue also helped me understand that Python's import behavior depends not only on the package structure but also on how the code is executed. Running the service with `python -m` allowed Python to resolve the project packages correctly from the project root.
+
+### Next
+
+Test the integrated sync service with a tampered/invalid webhook and confirm that the service rejects it before any processing occurs.
+
+After that, add a downstream operation and integrate the retry/backoff logic for transient failures.
