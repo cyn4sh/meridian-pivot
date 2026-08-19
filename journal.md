@@ -154,3 +154,55 @@
 - Source consulted: None — direct implementation based on the webhook verification concepts researched earlier.
 
 - Next: Create a separate tampering/invalid-signature experiment by changing the webhook payload while keeping the original received signature unchanged. The purpose is to confirm that the verification mechanism detects when the payload has been altered and returns `False` instead of accepting the webhook.
+
+
+### [20:43] Attempting
+
+Testing whether the webhook verification logic correctly rejects a tampered webhook payload. The goal was to test the invalid-signature path and complement the valid-signature verification I had already tested.
+
+### Tried
+
+1. Created a standalone `webhook_tampering.py` experiment to simulate a tampered webhook payload.
+2. Started with the original payload:
+
+   `b'{"sku":"MOUSE001","quantity":10}'`
+
+   and the signature generated from that original payload.
+3. Changed the payload by modifying the quantity from `10` to `1000`, while keeping the original signature unchanged.
+4. Initially calculated the expected signature for the modified payload separately and compared it with the original signature using `hmac.compare_digest()`.
+5. Then changed the tampering experiment to use the actual `verify_signature()` function from `webhook_signature_verification.py`.
+6. While testing this, I noticed that importing `verify_signature()` also caused the original verification test in `webhook_signature_verification.py` to run, producing an additional `Signature valid: True` output.
+7. I fixed this by placing the original verification demonstration under `if __name__ == "__main__":`. This allowed the function to be imported without automatically running the demonstration code.
+
+### Result
+
+The original verification experiment still worked correctly when run directly:
+
+Signature valid: True
+
+The tampering experiment then produced:
+
+Received signature: f8643d9849640df3411646b1748dc9999e85bf0553bd8e0bbd19f2be63c8927c
+Tampered payload: {"sku":"MOUSE001","quantity":1000}
+Signature valid: False
+
+This confirmed that the actual `verify_signature()` function correctly detects when the webhook payload has been modified while the original signature remains unchanged.
+
+The test demonstrated that the receiver calculates the expected signature from the payload it actually receives. Because the tampered payload produces a different HMAC-SHA256 signature, `hmac.compare_digest()` returns `False`, meaning the webhook should be rejected.
+
+I also learned that Python executes a module's top-level code when it is imported. Using `if __name__ == "__main__":` separates reusable functions from code intended to run only when the file is executed directly.
+
+### Source consulted
+
+I applied the same "test both paths" approach used during the retry/backoff experiments. The retry work showed that testing only successful operations is not enough; the failure path also needs to be demonstrated.
+
+I applied the same principle to webhook verification by testing both:
+
+- a valid payload/signature combination
+- an invalid combination caused by payload tampering
+
+### Next
+
+Combine the retry/backoff and webhook verification work into one coherent sync-service prototype.
+
+The intended flow is to verify an incoming webhook first and reject it if the signature is invalid. If verification succeeds, the service can proceed with a downstream operation and use retry/backoff when that operation encounters a transient failure.

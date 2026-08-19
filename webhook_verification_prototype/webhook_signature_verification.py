@@ -24,10 +24,11 @@ def verify_signature(payload, secret, received_signature):
     )
 
 
-is_valid = verify_signature(
-    payload,
-    secret,
-    received_signature
-)
+if __name__ == "__main__":
+    is_valid = verify_signature(
+        payload,
+        secret,
+        received_signature
+    )
 
-print("Signature valid:", is_valid)
+    print("Signature valid:", is_valid)
