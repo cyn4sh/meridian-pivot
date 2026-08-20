@@ -533,3 +533,67 @@ The registry therefore has a focused responsibility: it knows how to find attend
 Create `check_in_service.py`.
 
 The check-in service will use the shared `Attendee` model and `AttendeeRegistry` to process scans. It will check the attendee's current state, reject duplicate scans, generate a unique `print_job_id`, move the attendee to `pending`, and prepare the print request for the message queue.
+
+
+### Check-In Service Experiment
+
+### [17:55] Attempting
+
+After completing the attendee state and registry experiments, I created the check-in service to implement the first actual workflow of the Solstice Events check-in system.
+
+The goal was to process an attendee scan while enforcing the state rules already established. A valid first scan should move an attendee from `not_checked_in` to `pending`, generate a `print_job_id`, and prepare the attendee for the badge-printing process. A duplicate scan should be rejected rather than creating another print job.
+
+The queue was intentionally kept out of this experiment. The purpose here was to prove the check-in decision logic independently before introducing message publishing and retry behavior.
+
+### Tried
+
+1. Created `solstice_pivot/check_in_service.py`.
+2. Reused the existing `Attendee` model from `attendee_state_transitions.py`.
+3. Reused the existing `AttendeeRegistry`.
+4. Created a `CheckInService` responsible for processing attendee scans.
+5. Looked up the attendee by `attendee_id`.
+6. Rejected the request when the attendee could not be found.
+7. Checked the attendee's current state before creating a print job.
+8. Generated a `print_job_id` for a valid first scan.
+9. Used `mark_pending()` to transition the attendee from `not_checked_in` to `pending`, then re-registered the attendee in the registry so the newly assigned `print_job_id` gets indexed for lookup (the registry only indexes by job ID once one exists on the attendee).
+10. Tested:
+    - a valid first scan,
+    - a duplicate scan,
+    - an unknown attendee.
+
+### Result
+
+The experiment produced:
+
+```text
+Alice first scan:
+{'success': True, 'attendee_id': 'A001', 'print_job_id': 'JOB-A001', 'status': 'pending'}
+
+Alice duplicate scan:
+{'success': False, 'message': 'Attendee already pending'}
+
+Unknown attendee:
+{'success': False, 'message': 'Attendee not found'}
+```
+
+The first scan was accepted and moved Alice into the `pending` state with the print job ID `JOB-A001`.
+
+A second scan for the same attendee was rejected because Alice was already `pending`. This prevents the service from creating another print request while the first badge-print operation is still awaiting confirmation.
+
+An unknown attendee was also rejected rather than creating a print job for an attendee that does not exist in the registry.
+
+### What I learned
+
+The check-in service acts as the decision-making layer between an incoming scan and the downstream printing process.
+
+The attendee's state must be checked before a print job is created. This provides an early duplicate-scan protection mechanism and ensures that the same attendee does not enter the printing workflow multiple times while their existing request is still pending.
+
+The service also reuses the existing attendee model and registry rather than introducing duplicate state or lookup logic. It does rely on calling `registry.add()` a second time after `mark_pending()`, since that is what causes the print-job-ID index to be populated once the ID exists.
+
+### Next
+
+Create `print_queue.py`.
+
+The next experiment will simulate publishing the generated print job to a message queue. It will distinguish between retryable failures, such as temporary network or broker failures, and permanent failures that should not be blindly retried.
+
+Retry and exponential backoff logic will be reused from the previously tested prototype rather than unnecessarily rebuilt.
