@@ -476,3 +476,60 @@ This provides an important foundation for idempotency. If a webhook for an atten
 ### Next
 
 Create a separate attendee registry experiment that can store multiple attendees and provide lookup by attendee ID and, later, by `print_job_id`. This will allow the check-in service and webhook handler to find the correct attendee without relying on scan or confirmation order.
+
+
+### Attendee Registry Experiment
+
+### [17:20] Attempting
+
+After implementing the attendee state-transition rules, I created a separate registry experiment to determine how the sync service will keep track of multiple attendees and locate them when processing scan requests and webhook confirmations.
+
+A key requirement is that webhook confirmations may arrive out of order. Therefore, the service cannot rely on the order in which attendees were scanned. It needs to identify the correct attendee using identifiers, particularly the `print_job_id` associated with a badge-print request.
+
+### Tried
+
+1. Created `solstice_pivot/attendee_registry.py`.
+2. Created an `AttendeeRegistry` class with separate lookup dictionaries for:
+   - attendee ID
+   - print job ID
+3. Added an `add()` method to register an attendee.
+4. Added `get_by_id()` to find an attendee using their attendee ID.
+5. Added `get_by_job_id()` to find an attendee using their print job ID.
+6. Initially tested the registry using a simplified `Attendee` class defined locally inside the file.
+7. While reviewing the experiment, I noticed that this created a second `Attendee` definition that was different from the actual `Attendee` class containing the state-transition logic.
+8. Removed the duplicate test class and imported the existing `Attendee` class from `attendee_state_transitions.py`.
+9. Created Alice and Bob using the actual attendee model and moved both into the `pending` state with their respective print job IDs.
+10. Retested the registry using the actual attendee objects.
+11. Also tested a lookup for an attendee that does not exist.
+
+### Result
+
+The corrected experiment produced:
+
+```text
+By attendee ID: Attendee(id=A001, name=Alice, status=pending, print_job_id=JOB-A001)
+By print job ID: Attendee(id=A002, name=Bob, status=pending, print_job_id=JOB-B001)
+Missing attendee: None
+```
+
+The registry successfully found Alice using her attendee ID and Bob using his print job ID. The lookup for a missing attendee correctly returned `None`.
+
+The important correction was replacing the simplified local `Attendee` class with the existing `Attendee` model from `attendee_state_transitions.py`. This means the registry has now been tested against the same attendee object that will be used by the rest of the service.
+
+The print-job lookup is particularly important for webhook processing. A webhook can contain `JOB-B001`, for example, and the service can use that identifier to locate Bob directly rather than assuming that Bob's confirmation will arrive after Alice's.
+
+### What I learned
+
+The registry separates attendee storage and lookup from the attendee's own state-transition logic.
+
+I also learned the importance of avoiding duplicate model definitions when building a multi-file application. The first registry test used a simplified stand-in `Attendee` class, which could have caused confusion once other parts of the service started importing and modifying the real attendee model.
+
+Using one shared `Attendee` definition keeps the state-transition rules and registry lookups working with the same object.
+
+The registry therefore has a focused responsibility: it knows how to find attendees, while the `Attendee` class knows how an attendee's state is allowed to change.
+
+### Next
+
+Create `check_in_service.py`.
+
+The check-in service will use the shared `Attendee` model and `AttendeeRegistry` to process scans. It will check the attendee's current state, reject duplicate scans, generate a unique `print_job_id`, move the attendee to `pending`, and prepare the print request for the message queue.
