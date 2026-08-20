@@ -339,3 +339,83 @@ Retry/backoff only ever runs after a webhook has passed signature verification �
 
 ### Source consulted
 Own retry/backoff and webhook verification experiments from earlier in the week; the exponential backoff formula and `hmac.compare_digest()` verification pattern were reused directly rather than rebuilt.
+
+
+
+## Day 4 — The Meridian Pivot: Solstice Events Check-In
+
+### Attendee State Foundation
+
+### [12:18] Attempting
+
+Before building the queue, webhook handler, and retry logic for the Solstice Events check-in service, I started by creating the foundation for tracking an attendee's check-in state.
+
+The design requires the service to know whether an attendee has not checked in, is waiting for their badge to be printed, or has already completed check-in. This state will later be used to prevent duplicate scans and to handle webhook confirmations that may arrive out of order.
+
+For the first experiment, I kept the implementation intentionally small. The goal was only to represent an attendee and confirm that the initial state was correct before adding state-transition logic.
+
+### Tried
+
+1. Created `solstice_pivot/attendee_state.py`.
+2. Created an `Attendee` class with:
+   - `attendee_id`
+   - `name`
+   - `status`
+3. Set the initial status of every new attendee to:
+
+   `not_checked_in`
+
+4. Added a `__repr__()` method so the attendee's information and current state could be displayed clearly while testing.
+5. Tested the file as a Python module from the project root using:
+
+   ```bash
+   python -m solstice_pivot.attendee_state
+   ```
+
+### Result
+
+The program produced:
+
+```
+Attendee(id=A001, name=Alice, status=not_checked_in)
+```
+
+This matched the expected result.
+
+The experiment confirmed that the basic attendee representation works and that a newly created attendee begins in the `not_checked_in` state.
+
+I intentionally stopped at this point rather than adding the remaining state-transition logic to the same experiment. The purpose of this stage was to verify the foundation independently before building on top of it.
+
+### What I learned
+
+The attendee state will be important for the duplicate-scan requirement. The service cannot simply assume that every QR scan should create a new print request. It needs to know the attendee's current state before deciding what to do.
+
+The planned state flow is:
+
+```
+not_checked_in
+      ↓
+   pending
+      ↓
+ checked_in
+```
+
+with a later failure path:
+
+```
+pending
+   ↓
+ failed
+```
+
+The current experiment only establishes the initial `not_checked_in` state. The transition rules will be implemented and tested as a separate experiment so that the progression remains visible.
+
+### Next
+
+Create a new separate file for the attendee state-transition experiment. This will add the `print_job_id` and enforce valid transitions such as:
+
+not_checked_in → pending
+pending → checked_in
+pending → failed
+
+It will also test an invalid duplicate transition, such as attempting to move an attendee from `checked_in` to `checked_in` again.
