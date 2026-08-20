@@ -419,3 +419,60 @@ pending → checked_in
 pending → failed
 
 It will also test an invalid duplicate transition, such as attempting to move an attendee from `checked_in` to `checked_in` again.
+
+
+### Attendee State Transition Experiment
+
+### [12:36] Attempting
+
+After confirming the basic attendee representation, I created a separate experiment to implement and test the state-transition rules for the check-in process.
+
+The goal was to prevent arbitrary changes to an attendee's state and establish the rules that will later support duplicate-scan protection and idempotent webhook handling.
+
+### Tried
+
+1. Created `solstice_pivot/attendee_state_transitions.py`.
+2. Added the `print_job_id` field, initially set to `None`.
+3. Added explicit transition methods:
+   - `mark_pending()`
+   - `mark_checked_in()`
+   - `mark_failed()`
+4. Restricted the transitions so that:
+   - `not_checked_in` can move to `pending`.
+   - `pending` can move to `checked_in`.
+   - `pending` can move to `failed`.
+   - Other transitions are rejected.
+5. Tested the normal check-in path from `not_checked_in` to `pending` and then to `checked_in`.
+6. Tested a duplicate check-in attempt after the attendee was already `checked_in`.
+
+### Result
+
+The experiment produced:
+
+```text
+Initial: Attendee(id=A001, name=Alice, status=not_checked_in, print_job_id=None)
+Mark pending: True
+After pending: Attendee(id=A001, name=Alice, status=pending, print_job_id=JOB-A001)
+Mark checked in: True
+After checked in: Attendee(id=A001, name=Alice, status=checked_in, print_job_id=JOB-A001)
+Duplicate check-in: False
+Final: Attendee(id=A001, name=Alice, status=checked_in, print_job_id=JOB-A001)
+```
+
+The valid transitions returned `True`, while the duplicate transition returned `False`.
+
+This confirmed that the state-transition methods enforce the intended workflow rather than allowing an attendee to be checked in repeatedly.
+
+The `print_job_id` is also stored when the attendee enters the `pending` state. This will later allow the webhook handler to identify the correct print job and attendee without relying on the order in which webhook confirmations arrive.
+
+Note: `mark_failed()` was implemented but not exercised in this experiment. It will be tested separately once the queue-publish failure path is built.
+
+### What I learned
+
+State transitions should be controlled by explicit rules rather than allowing every part of the application to modify the status directly.
+
+This provides an important foundation for idempotency. If a webhook for an attendee who is already `checked_in` is received again, the transition method can reject it instead of processing the confirmation a second time.
+
+### Next
+
+Create a separate attendee registry experiment that can store multiple attendees and provide lookup by attendee ID and, later, by `print_job_id`. This will allow the check-in service and webhook handler to find the correct attendee without relying on scan or confirmation order.
