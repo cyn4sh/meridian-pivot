@@ -649,3 +649,84 @@ It will also test duplicate webhook delivery and out-of-order confirmation handl
 After the webhook handler is complete, the final `pivot_demo.py` will connect the full flow:
 
 scan → queue publish → retry/backoff → webhook → checked_in.
+
+
+### Webhook Handler and End-to-End Pivot Demo
+
+### [19:09] Attempting
+
+With the check-in service and print queue both working, I built the webhook handler to receive and process print-completion callbacks, then a full end-to-end demo tying every piece of the pivot scenario together: scan, publish, webhook confirmation, idempotency, and out-of-order handling.
+
+### Tried
+
+**1. `webhook_handler.py`**
+- Reused the same HMAC-SHA256 signature verification pattern from the Assignment 1 webhook work.
+- `WebhookHandler.handle()` verifies the signature, parses the JSON payload, looks up the attendee by `print_job_id` via the registry, and checks the attendee's current state before transitioning.
+- If the attendee is already `checked_in`, the handler returns `"Webhook already processed"` instead of re-processing — the idempotency guard.
+- Tested with a single attendee (Alice): the first webhook transitions her to `checked_in`; a duplicate webhook is correctly recognized and not reapplied.
+
+**2. `pivot_demo.py`** — end-to-end scenario with two attendees, Alice and Bob:
+1. Both scan and move to `pending`.
+2. Alice's print job is published — fails twice, succeeds on the third attempt via `retry_with_backoff`.
+3. Bob's print job is published using a **separate `PrintQueue()` instance**. My first version shared one `PrintQueue` across both attendees, and the internal attempt counter carried over from Alice's failures — Bob's publish then succeeded immediately on its first call with no retry, since the counter was already past the failure threshold. This wasn't a real success path; it was an artifact of shared mutable state between two unrelated print jobs. I fixed this by giving each attendee's publish its own `PrintQueue()` instance so each job's failure/retry behavior is independent.
+4. Bob's webhook confirmation is delivered *before* Alice's, even though Alice scanned first — simulating out-of-order confirmations.
+5. A duplicate Bob webhook is sent afterward to confirm idempotency.
+6. Final registry state for both attendees is printed.
+
+### Result
+
+```text
+=== 1. Attendee scans ===
+Alice: {'success': True, 'attendee_id': 'A001', 'print_job_id': 'JOB-A001', 'status': 'pending'}
+Bob: {'success': True, 'attendee_id': 'A002', 'print_job_id': 'JOB-A002', 'status': 'pending'}
+
+=== 2. Publish Alice's print job ===
+Queue publish attempt 1
+Retryable failure: Temporary message broker failure
+Waiting 1 seconds before retrying...
+Queue publish attempt 2
+Retryable failure: Temporary message broker failure
+Waiting 2 seconds before retrying...
+Queue publish attempt 3
+Print job published: {'print_job_id': 'JOB-A001', 'attendee_id': 'A001', 'name': 'Alice'}
+Alice publish successful: True
+
+=== 3. Publish Bob's print job ===
+Queue publish attempt 1
+Retryable failure: Temporary message broker failure
+Waiting 1 seconds before retrying...
+Queue publish attempt 2
+Retryable failure: Temporary message broker failure
+Waiting 2 seconds before retrying...
+Queue publish attempt 3
+Print job published: {'print_job_id': 'JOB-A002', 'attendee_id': 'A002', 'name': 'Bob'}
+Bob publish successful: True
+
+=== 4. Out-of-order webhook confirmations ===
+Bob webhook arrives first:
+{'success': True, 'message': 'Webhook processed successfully', 'attendee_id': 'A002', 'status': 'checked_in'}
+
+Alice webhook arrives second:
+{'success': True, 'message': 'Webhook processed successfully', 'attendee_id': 'A001', 'status': 'checked_in'}
+
+=== 5. Duplicate webhook ===
+{'success': True, 'message': 'Webhook already processed', 'attendee_id': 'A002', 'status': 'checked_in'}
+
+=== 6. Final attendee states ===
+Alice: Attendee(id=A001, name=Alice, status=checked_in, print_job_id=JOB-A001)
+Bob: Attendee(id=A002, name=Bob, status=checked_in, print_job_id=JOB-A002)
+```
+
+Both print jobs failed twice and recovered independently on the third attempt, with correct exponential backoff delays. Bob's webhook — arriving before Alice's despite scanning second — was processed correctly using `print_job_id` lookup rather than assuming scan order. Alice's state was untouched until her own webhook arrived. The duplicate webhook for Bob was recognized and not reapplied.
+
+### What I learned
+
+A shared, stateful object (`PrintQueue`) reused across independent operations can silently leak state between them. Bob's publish appeared to succeed cleanly, but only because it inherited Alice's already-exhausted failure counter. This reinforced the importance of correctly scoping state: an operation's success or failure needs to be evaluated on its own terms, not on leftover state from an unrelated prior call. Giving each print job its own queue instance fixed this and made the demo an honest test of two independent failures rather than one accidental pass-through.
+
+The full flow — verify → check state → act → guard against duplicates — held up correctly end-to-end, using `print_job_id` as the stable identifier throughout rather than relying on the order operations happened to occur in.
+
+### Next
+
+This completes the core technical demonstration for the Solstice Events pivot: state tracking, duplicate-scan protection, queue publish with retry/backoff (including a genuine permanent-failure test), webhook verification, out-of-order confirmation handling, and idempotency.
+
+Next, complete the Scope Delta Analysis document and final README update.
