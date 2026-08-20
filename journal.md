@@ -597,3 +597,55 @@ Create `print_queue.py`.
 The next experiment will simulate publishing the generated print job to a message queue. It will distinguish between retryable failures, such as temporary network or broker failures, and permanent failures that should not be blindly retried.
 
 Retry and exponential backoff logic will be reused from the previously tested prototype rather than unnecessarily rebuilt.
+
+### Print Queue Experiment
+
+### [18:48] Attempting
+
+After completing the check-in service, I created an experiment to simulate the vendor's message queue and the queue-publish step that happens after an attendee is marked `pending`. The goal was to reproduce a transient publish failure with retry/backoff, and separately confirm that a permanent failure is not retried.
+
+### Tried
+
+1. Created `solstice_pivot/print_queue.py`.
+2. Defined two exception types: `TemporaryQueueError` and `PermanentQueueError`.
+3. Created a `PrintQueue` class whose `publish()` method fails on the first two attempts with `TemporaryQueueError`, then succeeds on the third.
+4. My first version of the retry loop had two gaps: it retried with no delay between attempts, and it never actually triggered `PermanentQueueError`, so that path was unverified. I revised the file to fix both.
+5. Added `retry_with_backoff(operation, max_retries=2, base_delay=1)`, a generic retry function taking any callable, using the same exponential formula (`base_delay * 2 ** attempt`) and `time.sleep()` proven in the Assignment 1 retry/backoff prototype.
+6. Ran two separate tests in `__main__`: one wrapping `queue.publish(print_job)` to prove the transient-failure/retry path, and a second calling a function that always raises `PermanentQueueError` immediately, to prove the non-retryable path.
+
+### Result
+
+```text
+=== Temporary failure test ===
+Queue publish attempt 1
+Retryable failure: Temporary message broker failure
+Waiting 1 seconds before retrying...
+Queue publish attempt 2
+Retryable failure: Temporary message broker failure
+Waiting 2 seconds before retrying...
+Queue publish attempt 3
+Print job published: {'print_job_id': 'JOB-A001', 'attendee_id': 'A001', 'name': 'Alice'}
+Publish successful: True
+
+=== Permanent failure test ===
+Permanent failure: Permanent message broker configuration failure
+Permanent failure handled without retry
+```
+
+The temporary-failure test retried twice with the expected 1s and 2s delays, then succeeded on the third attempt. The permanent-failure test failed immediately with no retry and no delay, confirming `retry_with_backoff()` correctly distinguishes retryable from non-retryable errors.
+
+### What I learned
+
+Retry/backoff logic needs to explicitly separate what should be retried from what shouldn't — the exception type is what drives that branch, not a blanket try/except. Generalizing the retry loop into a function that takes any operation (rather than one hardcoded to a specific call) made it reusable for the queue-publish case without duplicating the loop structure itself.
+
+### Next
+
+Create `webhook_handler.py`.
+
+The webhook handler will receive the print-completion callback, verify its signature, locate the attendee using the `print_job_id`, and safely transition the attendee from `pending` to `checked_in`.
+
+It will also test duplicate webhook delivery and out-of-order confirmation handling so that the same print confirmation cannot incorrectly process an attendee more than once.
+
+After the webhook handler is complete, the final `pivot_demo.py` will connect the full flow:
+
+scan → queue publish → retry/backoff → webhook → checked_in.
