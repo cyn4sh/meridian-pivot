@@ -26,6 +26,8 @@ Built and tested in isolation, no outside help:
   Northstar Retail warehouse scenario) combining both tools before the real
   Day 4 pivot brief arrived.
 
+  **Deprecated** - superseded by `solstice_pivot/` once the actual Solstice Events pivot scenario was released.
+
 Full process, real terminal output, and blockers are documented in
 `journal.md`, logged live as the work happened.
 
